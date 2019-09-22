@@ -1,0 +1,12 @@
+{
+  "name": "ui5-middleware-destination",
+  "version": "1.0.0",
+  "description": "Custom Server middleware to provide proxy capabilities and support neo-app.json",
+  "main": "src/main.js",
+  "scripts": {},
+  "author": "Preetam Kajal Rout <preetamkajalrout@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "http-proxy": "^1.17.0"
+  }
+}
