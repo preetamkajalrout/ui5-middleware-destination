@@ -2,6 +2,6 @@ specVersion: "1.0"
 kind: extension
 type: server-middleware
 metadata:
-  name: destinations
+  name: ui5-middleware-destination
 middleware:
   path: src/main.js
