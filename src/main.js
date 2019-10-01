@@ -29,7 +29,7 @@ function initProxyDestination () {
 }
 
 function buildRouteConfigMap () {
-  routes.forEach(route => {
+  routes.forEach(function (route) {
     this[route.path] = route;
   }, routesConfig);
 }
@@ -66,7 +66,7 @@ function buildProxyObject (reqUrl, matchedRoute) {
     routeProxyObj.proxyConfig.target = routeDestination.URL;
   }
 
-  routeProxyObj.proxyConfig.resourcePath += (resourceRoute.entryPath || matchedRoute) + resourcePath;
+  routeProxyObj.resourcePath += (resourceRoute.entryPath || matchedRoute) + resourcePath;
 
   // Add authorization info for proxy
   if (routeDestination.User) {
