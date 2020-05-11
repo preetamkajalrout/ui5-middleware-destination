@@ -1,0 +1,25 @@
+{
+  "destinations": { 
+    "sapui5": {
+      "Description": "SAPUI5 Resources",
+      "cdn": "https://sapui5.hana.ondemand.com",
+      "path": "C:\\Dev\\sapui5\\sdk",
+      "localDir": false
+    },
+    "sap_gateway_GWS": {
+      "Description":"Gateway dev",
+      "Type":"HTTP",
+      "Authentication":"BasicAuthentication",
+      "WebIDEUsage":"odata_abap, ui5_execute_abap, dev_abap",
+      "Name":"sap_gateway_GWS",
+      "Usage":"Backend",
+      "WebIDEEnabled":"true",
+      "URL": "<InternalURL>",
+      "ProxyType":"OnPremise",
+      "sap-client":"100",
+      "User":"<SystemUser>",
+      "Password": "<SystemPassword>",
+      "WebIDESystem":"GWS"
+    }
+  }
+}
