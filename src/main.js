@@ -1,6 +1,6 @@
 const log = require("@ui5/logger").getLogger("server:middleware:ui5-middlware-destination");
-const parseurl = require("parseurl");
-const querystring = require("querystring");
+const serveStatic = require("serve-static");
+const finalhandler = require("finalhandler");
 const httpProxy = require("http-proxy");
 const proxyServer = new httpProxy.createProxyServer();
 
@@ -11,7 +11,12 @@ const HEADER_ALLOW_CONTROL_ALLOW_METHODS = "Access-Control-Allow-Methods";
 const HEADER_ALLOW_CONTROL_ALLOW_HEADERS = "Access-Control-Allow-Headers";
 
 // Variables for each app
-var destinations, routes, routesConfig = {};
+var isDebugMode, // If debug property set for middleware call
+    serve, // Static serve utility for SAPUI5 resources
+    isLocalResources = false, // Stores the config if resources to be served from local file system instead of normal proxy server
+    destinations, // List of destinations mentioned in local destinations file (to be extracted from middleware config)
+    routes, // Routes mentioned in neo-app.json
+    routesConfig = {}; // Route config for each type of route
 
 function addHeader(res, header, value) {
 	const current = res.get(header);
@@ -26,6 +31,14 @@ function addHeader(res, header, value) {
 
 function initProxyDestination () {
   buildRouteConfigMap();
+  if (destinations["sapui5"]) { // If resources can be served as per local destination config
+    if (destinations["sapui5"].localDir) {
+      isLocalResources = true;
+      serve = serveStatic(destinations["sapui5"].path, {
+        "index": false
+      });
+    }
+  }
 }
 
 function buildRouteConfigMap () {
@@ -59,14 +72,19 @@ function buildProxyObject (reqUrl, matchedRoute) {
 
   // Serve SAPUI5 resources from destinations configuration
   if (resourceRoute.type && resourceRoute.type === "service" && resourceRoute.name === "sapui5") {
-    routeProxyObj.resourcePath = resourceRoute.version ? `/${resourceRoute.version}` : "",
+    routeProxyObj.resourcePath = resourceRoute.version ? `/${resourceRoute.version}` : "";
     routeProxyObj.proxyConfig.target = routeDestination.cdn;
+    routeProxyObj.proxyConfig.changeOrigin = true;
   } else {
     routeProxyObj.resourcePath = "";
     routeProxyObj.proxyConfig.target = routeDestination.URL;
   }
 
   routeProxyObj.resourcePath += (resourceRoute.entryPath || matchedRoute) + resourcePath;
+
+  if (isDebugMode) {
+    log.info(`Serving ${routeProxyObj.resourcePath} from ${routeProxyObj.proxyConfig.target}`);
+  }
 
   // Add authorization info for proxy
   if (routeDestination.User) {
@@ -76,6 +94,13 @@ function buildProxyObject (reqUrl, matchedRoute) {
   return routeProxyObj;
 }
 
+function _getFormattedUrlForResource (sResourceUrl) {
+  var resourceRoute = routesConfig["/resources"].target,
+      rResourcePattern = new RegExp(`/resources(/.*)$`);
+  
+  sResourceUrl = `${resourceRoute.version ? '/' + resourceRoute.version : ''}${resourceRoute.entryPath || "/resources"}${rResourcePattern.exec(sResourceUrl)[1]}`;
+  return sResourceUrl;
+}
 
 /**
  * Custom UI5 Server middleware example
@@ -90,11 +115,14 @@ function buildProxyObject (reqUrl, matchedRoute) {
  *                                        the projects dependencies
  * @param {Object} parameters.options Options
  * @param {string} [parameters.options.configuration] Custom server middleware configuration if given in ui5.yaml
+ * @param {string} [parameters.options.configuration.destination_path] Absolute Path in local system to find the set of destinations file
+ * @param {string} [parameters.options.configuration.debug] If set, Logs messages for which calls are being proxied & from where
  * @returns {function} Middleware function to use
  */
 function createMiddleware({resources, options}) {
   destinations = require(options.configuration.destination_path)["destinations"];
   routes = require(resources.rootProject._readers[0]._project.path + "/neo-app.json")["routes"];
+  isDebugMode = options.configuration.debug || false;
 
   initProxyDestination(); //Build all the configs for upcoming requests
 
@@ -109,6 +137,7 @@ function createMiddleware({resources, options}) {
       addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_HEADERS, "X-Requested-With, Accept, Origin, Referer, User-Agent, Content-Type, Authorization, X-Mindflash-SessionID");
       // Intercept OPTIONS method
       if (req.method === "OPTIONS") {
+        // addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_ORIGIN, "*");
         res.status(200);
         next();
         return;
@@ -117,20 +146,27 @@ function createMiddleware({resources, options}) {
       // Perform route matching to see if neo-app.json contains any entry matching the URL
       matchedRoute = findRoute(req.url);
 
-      if (!matchedRoute|| matchedRoute === "/") {
+      if (!matchedRoute || matchedRoute === "/") {
         next();
         return;
       }
 
-      routeProxy = buildProxyObject(req.url, matchedRoute);
-      req.url = routeProxy.resourcePath;
-
-      proxyServer.web(req, res, routeProxy.proxyConfig, (err) => {
-        if (err) {
-          next(err);
+      if (matchedRoute.startsWith("/resources") && isLocalResources) {
+        req.url = _getFormattedUrlForResource(req.url);
+        if (isDebugMode) {
+          log.info(`Serving ${req.url} from ${destinations["sapui5"].path}`)
         }
-      });
-
+        serve(req, res, finalhandler(req, res));
+      } else {
+        routeProxy = buildProxyObject(req.url, matchedRoute);
+        req.url = routeProxy.resourcePath;
+  
+        proxyServer.web(req, res, routeProxy.proxyConfig, (err) => {
+          if (err) {
+            next(err);
+          }
+        });
+      }
     } catch (err) {
       next(err);
     }
