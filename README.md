@@ -18,7 +18,7 @@ For the time being, only URL, User & Password fields are supported. Anything els
 *NOTE: Storing passwords in plain text format is still a potential security risk. Please comply with your organization's policy. I am working on a possible alternative to use environment variables to avoid this. But not sure on timelines.*
 
 ## Options for SAPUI5 config in destinations file
-```json
+```jsonc
 "sapui5": {
   "Description": "SAPUI5 Resources",
   "cdn": "https://sapui5.hana.ondemand.com", // Used when 'localDir' is set to false
@@ -34,7 +34,7 @@ For the time being, only URL, User & Password fields are supported. Anything els
 ## Usage
 1. Define the dependency in `$yourapp/package.json`:
 
-```json
+```jsonc
 "devDependencies": {
     // ...
     "ui5-middleware-destination": "*"
