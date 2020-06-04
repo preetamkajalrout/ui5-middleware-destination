@@ -249,7 +249,7 @@
     "prefer-numeric-literals": "error",
     "prefer-object-spread": "error",
     "prefer-promise-reject-errors": "error",
-    "prefer-reflect": "error",
+    "prefer-reflect": "off",
     "prefer-regex-literals": "off",
     "prefer-rest-params": "error",
     "prefer-spread": "error",
