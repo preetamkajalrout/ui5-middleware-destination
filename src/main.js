@@ -21,17 +21,17 @@ function createMiddleware(parameters) {
       debugMode,
       EXTRA_HEADERS,
       getProxyConfig,
-      getResolvedResource,
-      setXCSRFToken,
-      unlockDestination
+      resolveResource,
+      lockAuthentication,
+      unlockAuthentication
     } = settings,
     logger = ui5logger.getLogger(MODULE_NAME),
     proxyServer = new httpProxy.createProxyServer(),
-    serve = customPathIsLocal &&
-      customPath &&
-      serveStatic(customPath, { index: false });
+    serve = customPathIsLocal && customPath && serveStatic(customPath, {
+      index: false
+    });
 
-  proxyServer.on("proxyRes", setXCSRFToken);
+  proxyServer.on("proxyRes", lockAuthentication);
 
   return function (req, res, next) {
     Object.entries(EXTRA_HEADERS).forEach((entry) => {
@@ -44,7 +44,7 @@ function createMiddleware(parameters) {
       return;
     }
 
-    getResolvedResource(req.url).then((resolvedResource) => {
+    resolveResource(req).then((resolvedResource) => {
       const {
         name,
         serveFromLocal,
@@ -56,14 +56,18 @@ function createMiddleware(parameters) {
       req.url = url;
 
       if (serveFromLocal) {
+
         if (debugMode) {
           logger.info(`Serving ${req.url} from ${target}`);
         }
 
         serve(req, res, finalhandler(req, res));
+
       } else if (serveWithProxy) {
-        const config = getProxyConfig(resolvedResource, req.method);
-        req.destination = name;
+
+        const config = getProxyConfig(resolvedResource);
+
+        req.destinationName = name;
 
         if (debugMode) {
           logger.info(`Serving ${req.url} from ${config.target}`);
@@ -71,10 +75,11 @@ function createMiddleware(parameters) {
 
         proxyServer.web(req, res, config, (error) => {
           if (error) {
-            unlockDestination(name);
+            unlockAuthentication(name);
             next(error);
           }
         });
+
       }
 
       return !serveFromLocal && !serveWithProxy;
