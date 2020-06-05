@@ -1,7 +1,7 @@
 # ui5-middleware-destination
 Custom UI5 server middleware for projects using [UI5 Tooling](https://sap.github.io/ui5-tooling)
 * Provides proxy capabilities and support for `neo-app.json` routes
-* Loads destinations from destination files, as WebIDE does
+* Works with destinations from destination files, as WebIDE does
 * Supports serving resources from local system or remote CDN (like the [SAPUI5 SDK](https://sapui5.hana.ondemand.com) or an ABAP application server)
 
 ## Installation
@@ -10,11 +10,13 @@ npm i --save-dev ui5-middleware-destination
 ```
 
 ## Pre-requisites
-Create a directory to hold the destination files needed for your project -- preferably, out of your project directory so that the same config can be used for multiple projects. This also helps keeping your credentials from being committed.
+Create a directory to hold the destination files needed for your project -- preferably, out of your project's root so that the same config can be used for multiple projects. This also helps keeping your credentials from being committed.
 
-Add the destination files for each system to the created directory. The destination file structure is the same as the one used for [WebIDE destinations](https://help.sap.com/viewer/825270ffffe74d9f988a0f0066ad59f0/CF/en-US/2cf47f37e34c428c97a51057733c0394.html) (also check the [example template](templates/example)).
+This middleware will look in that directory for one (or many) json file(s) with a specific structure (check the [example json](templates/destinations.json)).
 
-For the time being, the only properties required in a destination file are **`Name`, `URL`, `User`, `Password` and `WebIDEUsage`**.
+As an alternative, the middleware will also look for destination files in the created directory. The structure of these files is the same as the one used in [WebIDE destination files](https://help.sap.com/viewer/825270ffffe74d9f988a0f0066ad59f0/CF/en-US/2cf47f37e34c428c97a51057733c0394.html) (also check the [example template](templates/webide-destination)).
+
+For the time being, the only properties required in a destination configuration are **`Name`, `URL`, `User`, `Password` and `WebIDEUsage`**.
 
 *NOTE: Storing passwords in plain text format ***is a potential security risk***. Please comply with your organization's policy.*
 
@@ -40,7 +42,7 @@ For the time being, the only properties required in a destination file are **`Na
 
 ### 2. Configure it in `$yourapp/ui5.yaml`
 
-#### Simplest example:
+#### Simplest usage:
 ```yaml
 server:
   customMiddleware:
@@ -93,9 +95,9 @@ server:
 ```
 
 ## Configuration options
-No options are mandatory, EXCEPT for **`destinationsPath`**. This option must be provided either in the yaml file or as an environment variable.
+**ATTENTION:** No options are mandatory, EXCEPT for **`destinationsPath`**. This option **must** be provided either in the `ui5.yml` file or as an environment variable (as in the description below).
 
-> Note that relative paths declared in these options are resolved against the project's root folder.
+> Note that relative paths declared in these options are resolved against the project's root.
 
 * **`debugMode`** *(boolean, default:* `false`*)*  
 Enables the logging of each request and where it is served from.
@@ -103,7 +105,7 @@ Enables the logging of each request and where it is served from.
 * **`destinationsPath`** *(string)*  
 Absolute or relative path to the [destination files](#pre-requisites).  
 If a relative path is provided, it is resolved against the project's root folder.  
-If you do not provide this option in the yaml file, you **must** set the `UI5_MIDDLEWARE_DESTINATIONS_PATH` environment variable. 
+If you do not provide this option in the `ui5.yml` file, you **must** set the `UI5_MIDDLEWARE_DESTINATIONS_PATH` environment variable. 
 
 * **`strictSSL`** *(boolean, default:* `true`*)*  
 When set to false, the proxy does not validate SSL certificates of the resource server.  
@@ -112,13 +114,13 @@ This covers the use case of, for example, serving routes from a corporate ABAP A
 * **`resources`** *(object)*  
 Options regarding SAPUI5 resources:
 
-  * **`preferLocal`** *(boolean, default:* `true`*)*  
-  When `true`, the proxy serves resources first from a local directory; when `false`, resources are served from a CDN.
-
   * **`customPath`** *(string)*  
   If `preferLocal` is `true`, then this is the local absolute or relative path to SAPUI5 resources.  
   When `preferLocal` is `false`, you must provide a CDN URL for the SAPUI5 resources.  
-  This option can be provided either in the yaml file or through the `UI5_MIDDLEWARE_RESOURCES_PATH` environment variable.
+  This option can be provided either in the `ui5.yml` file or through the `UI5_MIDDLEWARE_RESOURCES_PATH` environment variable.
+  
+  * **`preferLocal`** *(boolean, default:* `true`*)*  
+  When `true`, the middleware attempts to serve resources first from locally available files (either project resources or files found in the `customPath`).
 
 ## How it works
 * Integrates [node-http-proxy](https://github.com/http-party/node-http-proxy) to proxy requests to remote server using the [destination files](#pre-requisites).
@@ -133,7 +135,7 @@ Currently only BasicAuthentication is supported.
 - [x] Support WebIDE destination files
 - [x] Support entryPath
 - [x] Support relative path settings
-- [x] Use of environment variables
+- [ ] Use of environment variables for credentials
 - [ ] Possible use of flp sandbox
 - [x] Documentation on how to use the module
 
