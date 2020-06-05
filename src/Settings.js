@@ -1,38 +1,106 @@
 const
-  fs = require("fs"),
+  { existsSync, promises: fsPromises } = require("fs"),
   path = require("path"),
   readProperties = require("properties-reader"),
-  url = require("url"),
+  URL = require("url"),
 
   CSRFTokenActions = Object.freeze({
     FETCH: "Fetch",
     REQUIRED: "Required"
   }),
-  NonModifyingMethods = Object.freeze({
-    GET: "GET",
-    HEAD: "HEAD",
-    OPTIONS: "OPTIONS"
-  }),
-  RouteTypes = Object.freeze({
-    DESTINATION: "destination",
-    SERVICE: "service"
+  EXTRA_HEADERS = Object.freeze({
+    "Accept": "*/*",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": [
+      "Accept",
+      "Authorization",
+      "Content-Type",
+      "Origin",
+      "Referer",
+      "User-Agent",
+      "X-Mindflash-SessionID",
+      "X-Requested-With"
+    ].join(", "),
+    "Access-Control-Allow-Methods": [
+      "DELETE",
+      "GET",
+      "HEAD",
+      "MERGE",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PUT"
+    ].join(", ")
   });
 
-function getNeoAppRoute(routes, resourcePath) {
+async function isResourceLocal(resolvedUrl) {
   const
-    initialRoute = { path: "" },
-    route = routes.
-      filter(({ path: routePath }) => resourcePath.includes(routePath)).
-      reduce((current, next) => (
-        next.path.length > current.path.length ? next : current
-      ), initialRoute),
-    { path: routePath = "", target = {} } = route,
-    { entryPath, name, type, version = "" } = target,
+    { customPath, customPathIsLocal, projectResources } = this,
+    resource = await projectResources.byPath(resolvedUrl, { nodir: false }),
+    { resolve } = customPathIsLocal ? path : URL,
+    customFilePath = customPath && resolve(customPath, resolvedUrl),
+    isLocal = existsSync(customFilePath) || resource;
+
+  return isLocal;
+}
+
+async function buildFileOptions(route) {
+  const
+    { name, resolvedUrl, type } = route,
+    { customPath, customPathIsLocal, preferLocal } = this,
+    resourceIsLocal = await isResourceLocal.call(this, resolvedUrl),
+    serveFromLocal = preferLocal && customPathIsLocal && resourceIsLocal,
+    target = (type === "service" && name === "sapui5") ? customPath : "";
+
+  return {
+    serveFromLocal,
+    target
+  };
+}
+
+function buildHeaders(destination, method) {
+  const
+    { Authorization, Cookie, CSRFToken: token } = destination,
+    requiresToken = !["GET", "HEAD", "OPTIONS"].includes(method),
+    CSRFToken = (token === CSRFTokenActions.FETCH || requiresToken) && token,
+    entries = [
+      ["Authorization", Authorization],
+      ["Cookie", Cookie],
+      ["X-CSRF-Token", CSRFToken]
+    ].filter(([, value]) => Boolean(value)),
+    headers = Object.fromEntries(entries);
+
+  return headers;
+}
+
+async function buildProxyOptions(route) {
+  const
+    { name, resolvedUrl, type } = route,
+    { destinations, preferLocal } = this,
+    { url = "" } = destinations.find(({ Name }) => Name === name) || {},
+    target = url.replace(/\\/g, ""),
+    isFromDestination = Boolean(type === "destination" && target),
+    resourceIsLocal = await isResourceLocal.call(this, resolvedUrl),
+    serveWithProxy = isFromDestination || (!preferLocal && !resourceIsLocal);
+
+  return {
+    serveWithProxy,
+    target
+  };
+}
+
+function findNeoAppRoute(url) {
+  const
+    { routes } = this,
+    filteredRoutes = routes.filter((route) => url.includes(route.path)),
+    longestRoute = filteredRoutes.reduce((current, next) => (
+      next.path.length > current.path.length ? next : current
+    ), { path: "" }),
+    { path: routePath = "", target = {} } = longestRoute,
+    { entryPath = "", name, type, version = "" } = target,
     pattern = new RegExp(`${routePath}(/.*)`),
-    matches = resourcePath.match(pattern),
-    targetEntryPath = entryPath || "",
-    targetName = matches[1] || "",
-    resolvedUrl = path.posix.join(version, targetEntryPath, targetName);
+    resolvedName = pattern.test(url) ? url.match(pattern)[1] : url,
+    resolvedUrl = path.posix.join(version, entryPath, resolvedName);
 
   return {
     name,
@@ -41,46 +109,54 @@ function getNeoAppRoute(routes, resourcePath) {
   };
 }
 
+function toDestinations(properties) {
+  const
+    { Name, Password, URL: url, User, WebIDEUsage = "" } = properties,
+    buffer = User && Buffer.from(`${User}:${Password}`),
+    Authorization = buffer && `Basic ${buffer.toString("base64")}`,
+    CSRFToken = WebIDEUsage.includes("odata") && CSRFTokenActions.FETCH;
+
+  return {
+    Authorization,
+    CSRFToken,
+    Cookie: "",
+    Name,
+    locked: false,
+    url
+  };
+}
+
+function toProperties(properties, file) {
+  const
+    { ext } = path.parse(file),
+    { destinations } = (ext === ".json") && require(file),
+    webideDestination = (ext === "") && readProperties(file).path(),
+    allProperties = properties.concat(destinations, webideDestination),
+    filteredProperties = allProperties.filter(Boolean);
+
+  return filteredProperties;
+}
+
 async function readDestinations(configPath) {
   const
-    envPath = process.env.UI5_MIDDLEWARE_DESTINATIONS_PATH,
-    providedPath = configPath || envPath || "",
-    // 'ui5 serve' only runs on projects' root folder
+    envPath = process.env.UI5_MIDDLEWARE_DESTINATIONS_PATH || "",
+    providedPath = configPath || envPath,
     resolvedPath = path.resolve(process.cwd(), providedPath),
-    files = await fs.promises.readdir(resolvedPath),
-    destinations = files.map((file) => {
-      const
-        filePath = path.resolve(resolvedPath, file),
-        properties = readProperties(filePath).path(),
-        { Name, Password, URL, User, WebIDEUsage = "" } = properties,
-        buffer = User && Buffer.from(`${User}:${Password}`),
-        Authorization = buffer && `Basic ${buffer.toString("base64")}`,
-        CSRFToken = WebIDEUsage.includes("odata") && CSRFTokenActions.FETCH;
-      return {
-        Authorization,
-        CSRFToken,
-        Cookie: "",
-        Name,
-        URL,
-        locked: false
-      };
-    });
+    files = await fsPromises.readdir(resolvedPath),
+    resolvedFiles = files.map((file) => path.resolve(resolvedPath, file)),
+    properties = resolvedFiles.reduce(toProperties, []),
+    destinations = properties.map(toDestinations);
 
   return destinations;
 }
 
 async function readNeoAppRoutes() {
-  // 'ui5 serve' only runs on projects' root folder
-  const filePath = path.resolve(process.cwd(), "neo-app.json");
+  const
+    filePath = path.resolve(process.cwd(), "neo-app.json"),
+    fileContents = await fsPromises.readFile(filePath, "utf8"),
+    { routes = [] } = JSON.parse(fileContents);
 
-  try {
-    const
-      fileContents = await fs.promises.readFile(filePath, "utf8"),
-      { routes = [] } = JSON.parse(fileContents);
-    return routes;
-  } catch (error) {
-    throw new Error(`Error while parsing neo-app.json: ${error.message}`);
-  }
+  return routes;
 }
 
 class Settings {
@@ -94,38 +170,13 @@ class Settings {
         resources = {},
         strictSSL = true
       } = parameters,
-      { customPath, preferLocal = true } = resources,
-      envPath = process.env.UI5_MIDDLEWARE_RESOURCES_PATH;
+      { customPath = "", preferLocal = true } = resources,
+      envPath = process.env.UI5_MIDDLEWARE_RESOURCES_PATH || "";
 
-    this.EXTRA_HEADERS = Object.freeze({
-      "Accept": "*/*",
-      "Access-Control-Allow-Credentials": "true",
-      "Access-Control-Allow-Headers": [
-        "Accept",
-        "Authorization",
-        "Content-Type",
-        "Origin",
-        "Referer",
-        "User-Agent",
-        "X-Mindflash-SessionID",
-        "X-Requested-With"
-      ].join(", "),
-      "Access-Control-Allow-Methods": [
-        "DELETE",
-        "GET",
-        "HEAD",
-        "MERGE",
-        "OPTIONS",
-        "PATCH",
-        "PUT",
-        "POST"
-      ].join(", ")
-    });
-
+    this.customPath = customPath || envPath;
+    this.customPathIsLocal = existsSync(this.customPath);
     this.debugMode = debugMode;
-    this.customPath = customPath || envPath || "";
-    // eslint-disable-next-line no-sync
-    this.customPathIsLocal = fs.existsSync(this.customPath);
+    this.EXTRA_HEADERS = EXTRA_HEADERS;
     this.preferLocal = preferLocal;
     this.projectResources = all;
     this.strictSSL = strictSSL;
@@ -133,38 +184,22 @@ class Settings {
     readDestinations(destinationsPath).then((destinations) => {
       this.destinations = destinations;
     });
-
     readNeoAppRoutes().then((routes) => {
       this.routes = routes;
     });
 
     this.getProxyConfig = this.getProxyConfig.bind(this);
-    this.getResolvedResource = this.getResolvedResource.bind(this);
-    this.setXCSRFToken = this.setXCSRFToken.bind(this);
-    this.unlockDestination = this.unlockDestination.bind(this);
+    this.lockAuthentication = this.lockAuthentication.bind(this);
+    this.resolveResource = this.resolveResource.bind(this);
+    this.unlockAuthentication = this.unlockAuthentication.bind(this);
   }
 
-  getProxyConfig(resolvedResource, method) {
+  getProxyConfig(resolvedResource) {
     const
+      { method, name, target } = resolvedResource,
       { destinations, strictSSL } = this,
-      { name, target, type } = resolvedResource,
-      headers = {};
-
-    if (type === RouteTypes.DESTINATION) {
-      const
-        { FETCH } = CSRFTokenActions,
-        destination = destinations.find(({ Name }) => Name === name),
-        { Authorization, Cookie, CSRFToken } = destination;
-      if (Authorization) {
-        headers.Authorization = Authorization;
-      }
-      if (Cookie) {
-        headers.Cookie = Cookie;
-      }
-      if (CSRFToken === FETCH || !NonModifyingMethods[method]) {
-        headers["X-CSRF-Token"] = CSRFToken;
-      }
-    }
+      destination = destinations.find(({ Name }) => Name === name) || {},
+      headers = buildHeaders(destination, method);
 
     return {
       changeOrigin: Boolean(target),
@@ -176,55 +211,12 @@ class Settings {
     };
   }
 
-  async getResolvedResource(sourceUrl) {
+  lockAuthentication(proxyRes, req) {
     const
-      {
-        customPath,
-        customPathIsLocal,
-        destinations,
-        preferLocal,
-        projectResources,
-        routes
-      } = this,
-      { name, resolvedUrl, type } = getNeoAppRoute(routes, sourceUrl),
-      { resolve } = customPathIsLocal ? path : url,
-      customFilePath = customPath && resolve(customPath, resolvedUrl),
-      // eslint-disable-next-line no-sync
-      customFileExists = fs.existsSync(customFilePath),
-      resource = await projectResources.byPath(resolvedUrl, { nodir: false }),
-      destination = destinations.find(({ Name }) => Name === name),
-      { DESTINATION, SERVICE } = RouteTypes,
-      isFromDestination = Boolean(type === DESTINATION && destination),
-      resolvedResource = {
-        name,
-        serveFromLocal: false,
-        serveWithProxy: false,
-        target: "",
-        type,
-        url: resolvedUrl
-      };
-
-    if (isFromDestination) {
-      resolvedResource.target = destination.URL.replace(/\\/g, "");
-    } else if (type === SERVICE && name === "sapui5") {
-      resolvedResource.target = customPath;
-    }
-
-    resolvedResource.serveFromLocal =
-      preferLocal && customPathIsLocal && customFileExists;
-
-    resolvedResource.serveWithProxy =
-      isFromDestination || (!preferLocal && !customPathIsLocal && !resource);
-
-    return resolvedResource;
-  }
-
-  setXCSRFToken(proxyRes, req) {
-    const
-      { headers: { "x-csrf-token": token, "set-cookie": cookies } } = proxyRes,
-      { destination: name } = req,
+      { headers: { "set-cookie": cookies, "x-csrf-token": token } } = proxyRes,
+      { destinationName } = req,
       destination = this.destinations.find(({ locked, Name }) => (
-        Name === name && !locked
+        Name === destinationName && !locked
       ));
 
     if (!destination) {
@@ -232,18 +224,38 @@ class Settings {
     }
 
     destination.locked = true;
-
-    if (Array.isArray(cookies)) {
-      destination.Cookie = cookies.join("; ");
-    }
-    if (token && token !== CSRFTokenActions.REQUIRED) {
-      destination.CSRFToken = token;
-    }
+    destination.Cookie = Array.isArray(cookies) ? cookies.join("; ") : "";
+    destination.CSRFToken = token !== CSRFTokenActions.REQUIRED && token;
   }
 
-  unlockDestination(name) {
+  async resolveResource({ url, method }) {
+    const
+      route = findNeoAppRoute.call(this, url),
+      { name, resolvedUrl, type } = route,
+      {
+        serveFromLocal,
+        target: localTarget = ""
+      } = await buildFileOptions.call(this, route),
+      {
+        serveWithProxy,
+        target: proxyTarget = ""
+      } = await buildProxyOptions.call(this, route),
+      target = proxyTarget || localTarget;
+
+    return {
+      method,
+      name,
+      serveFromLocal,
+      serveWithProxy,
+      target,
+      type,
+      url: resolvedUrl
+    };
+  }
+
+  unlockAuthentication(destinationName) {
     const destination = this.destinations.find(({ locked, Name }) => (
-      Name === name && locked
+      Name === destinationName && locked
     ));
 
     if (!destination) {
