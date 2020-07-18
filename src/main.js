@@ -9,6 +9,10 @@ const HEADER_ALLOW_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
 const HEADER_ALLOW_CONTROL_ALLOW_CREDENTIALS = "Access-Control-Allow-Credentials";
 const HEADER_ALLOW_CONTROL_ALLOW_METHODS = "Access-Control-Allow-Methods";
 const HEADER_ALLOW_CONTROL_ALLOW_HEADERS = "Access-Control-Allow-Headers";
+const CSRFTokenActions = Object.freeze({
+  FETCH: "Fetch",
+  REQUIRED: "Required"
+});
 
 // Variables for each app
 var isDebugMode, // If debug property set for middleware call
@@ -60,7 +64,21 @@ function findRoute (routeToMatch) {
   return matchedRoute;
 }
 
-function buildProxyObject (reqUrl, matchedRoute) {
+function buildReqHeaders(destinationName, method) {
+  const destination = destinations[destinationName],
+  { Cookie, CSRFToken: token } = destination,
+    requiresToken = !["GET", "HEAD", "OPTIONS"].includes(method),
+    CSRFToken = (token === CSRFTokenActions.FETCH || requiresToken) && token,
+    entries = [
+      ["Cookie", Cookie],
+      ["X-CSRF-Token", CSRFToken]
+    ].filter(([, value]) => Boolean(value)),
+    headers = Object.fromEntries(entries);
+
+  return headers;
+}
+
+function buildProxyObject (reqUrl, matchedRoute, method) {
   let routeProxyObj = {
     resourcePath: "",
     proxyConfig: {}
@@ -74,11 +92,13 @@ function buildProxyObject (reqUrl, matchedRoute) {
   if (resourceRoute.type && resourceRoute.type === "service" && resourceRoute.name === "sapui5") {
     routeProxyObj.resourcePath = resourceRoute.version ? `/${resourceRoute.version}` : "";
     routeProxyObj.proxyConfig.target = routeDestination.cdn;
-    routeProxyObj.proxyConfig.changeOrigin = true;
   } else {
     routeProxyObj.resourcePath = "";
     routeProxyObj.proxyConfig.target = routeDestination.URL;
+    routeProxyObj.destinationName = resourceRoute.name;
   }
+  routeProxyObj.proxyConfig.changeOrigin = true;
+  routeProxyObj.proxyConfig.headers = buildReqHeaders(resourceRoute.name, method);
 
   routeProxyObj.resourcePath += (resourceRoute.entryPath || matchedRoute) + resourcePath;
 
@@ -100,6 +120,36 @@ function _getFormattedUrlForResource (sResourceUrl) {
   
   sResourceUrl = `${resourceRoute.version ? '/' + resourceRoute.version : ''}${resourceRoute.entryPath || "/resources"}${rResourcePattern.exec(sResourceUrl)[1]}`;
   return sResourceUrl;
+}
+
+function lockAuthentication (proxyRes, req) {
+  const 
+    { headers: { "set-cookie" : cookies, "x-csrf-token": token } } = proxyRes,
+    { destinationName } = req;
+
+    destination = destinations[destinationName] && !(destinations[destinationName].locked || false) ? destinations[destinationName] : null;
+
+  if (!destination) {
+    return;
+  }
+
+  destination.locked = true;
+  destination.Cookie = Array.isArray(cookies) ? cookies.join("; ") : "";
+  destination.CSRFToken = token !== CSRFTokenActions.REQUIRED && token;
+  destinations[destinationName] = destination;
+}
+
+function unlockAuthentication(destinationName) {
+  const destination = destinations[destinationName] && (destinations[destinationName].locked || false) ? destinations[destinationName] : null;
+
+  if (!destination) {
+    return;
+  }
+
+  destination.Cookie = "";
+  destination.CSRFToken = CSRFTokenActions.FETCH;
+  destination.locked = false;
+  destinations[destinationName] = destination;
 }
 
 /**
@@ -126,6 +176,8 @@ function createMiddleware({resources, options}) {
 
   initProxyDestination(); //Build all the configs for upcoming requests
 
+  proxyServer.on("proxyRes", lockAuthentication);
+
   return async function proxyDestinations(req, res, next) {
     try {
       let matchedRoute;
@@ -134,7 +186,7 @@ function createMiddleware({resources, options}) {
       addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_ORIGIN, "*");
       addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_CREDENTIALS, "true");
       addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_METHODS, "GET,PUT,POST,DELETE");
-      addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_HEADERS, "X-Requested-With, Accept, Origin, Referer, User-Agent, Content-Type, Authorization, X-Mindflash-SessionID");
+      addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_HEADERS, "X-Requested-With, Accept, Origin, Referer, User-Agent, Content-Type, Authorization");
       // Intercept OPTIONS method
       if (req.method === "OPTIONS") {
         // addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_ORIGIN, "*");
@@ -158,11 +210,13 @@ function createMiddleware({resources, options}) {
         }
         serve(req, res, finalhandler(req, res));
       } else {
-        routeProxy = buildProxyObject(req.url, matchedRoute);
+        routeProxy = buildProxyObject(req.url, matchedRoute, req.method);
         req.url = routeProxy.resourcePath;
-  
+        req.destinationName = routeProxy.destinationName;
+        delete routeProxy.destinationName;
         proxyServer.web(req, res, routeProxy.proxyConfig, (err) => {
           if (err) {
+            unlockAuthentication(req.destinationName);
             next(err);
           }
         });
