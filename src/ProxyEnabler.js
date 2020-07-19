@@ -136,7 +136,7 @@ async function buildProxyOptions(route) {
     { destinations, preferLocal } = this,
     { url: target = "" } = destinations[name] || {},
     serveFromLocal = (type === DESTINATION_TYPE.SERVICE && name === "sapui5" && preferLocal),
-    serveFromProxy = (type === DESTINATION_TYPE.DESTINATION && target);
+    serveFromProxy = Boolean(target);
 
   return {
     serveFromLocal: serveFromLocal || false,
