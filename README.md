@@ -28,8 +28,14 @@ For the time being, only URL, WebIDEUsage, User & Password fields are supported.
 ```
 
 ## Configuration options (in $yourapp/ui5.yml)
-* **destinationsPath**: path for directory where destination files are stored (absolute or relative to `$yourapp/ui5.yaml`) (Description [above](#Pre-requisites))
-* **debug**: (Possible Values: true/false, default: false) : Enables the logging of each request & where it is served from
+* **destinationsPath**: *(string)*  
+Absolute or relative path to the [destination files](#pre-requisites).  
+If a relative path is provided, it is resolved against the project's root folder.
+* **debug**: *(boolean, default:* `false`*)*  
+Enables the logging of each request and where it is served from.
+* **strictSSL**: *(boolean, default:* `true`*)*  
+When set to false, the proxy does not validate SSL certificates of the resource server.  
+This covers the use case of, for example, serving routes from a corporate ABAP AS with a self-signed certificate.
 
 ## Usage
 1. Define the dependency in `$yourapp/package.json`:
