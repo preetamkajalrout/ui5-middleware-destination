@@ -119,7 +119,7 @@ function findNeoAppRoute(url) {
     ), { path: "" }),
     { path: routePath = "", target = {} } = longestRoute,
     { entryPath = "", name, type, version = "" } = target,
-    pattern = new RegExp(`${routePath}(/.*)`),
+    pattern = new RegExp(`${routePath}(/?.*)`),
     resolvedName = pattern.test(url) ? url.match(pattern)[1] : url,
     resolvedUrl = path.posix.join(version, entryPath, resolvedName);
 
