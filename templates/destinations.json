@@ -1,12 +1,13 @@
 {
-  "destinations": { 
-    "sapui5": {
+  "destinations": [
+    {
+      "Name": "sapui5",
       "Description": "SAPUI5 Resources",
-      "cdn": "https://sapui5.hana.ondemand.com",
-      "path": "C:\\Dev\\sapui5\\sdk",
-      "localDir": false
+      "URL": "https://sapui5.hana.ondemand.com",
+      "shouldBeUsedAsURL": "C:\\Dev\\sapui5\\sdk",
+      "preferLocal": false
     },
-    "sap_gateway_GWS": {
+    {
       "Description":"Gateway dev",
       "Type":"HTTP",
       "Authentication":"BasicAuthentication",
@@ -21,5 +22,5 @@
       "Password": "<SystemPassword>",
       "WebIDESystem":"GWS"
     }
-  }
+  ]
 }
