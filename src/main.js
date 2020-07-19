@@ -1,231 +1,86 @@
-const log = require("@ui5/logger").getLogger("server:middleware:ui5-middlware-destination");
-const serveStatic = require("serve-static");
-const finalhandler = require("finalhandler");
-const httpProxy = require("http-proxy");
-const proxyServer = new httpProxy.createProxyServer();
+const
+  MODULE_NAME = "server:middleware:ui5-middleware-destination",
+  finalhandler = require("finalhandler"),
+  httpProxy = require("http-proxy"),
+  serveStatic = require("serve-static"),
+  ui5logger = require("@ui5/logger"),
 
-// Global response header constants
-const HEADER_ALLOW_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
-const HEADER_ALLOW_CONTROL_ALLOW_CREDENTIALS = "Access-Control-Allow-Credentials";
-const HEADER_ALLOW_CONTROL_ALLOW_METHODS = "Access-Control-Allow-Methods";
-const HEADER_ALLOW_CONTROL_ALLOW_HEADERS = "Access-Control-Allow-Headers";
-const CSRFTokenActions = Object.freeze({
-  FETCH: "Fetch",
-  REQUIRED: "Required"
-});
+  ProxyEnabler = require("./ProxyEnabler");
 
-// Variables for each app
-var isDebugMode, // If debug property set for middleware call
-    serve, // Static serve utility for SAPUI5 resources
-    isLocalResources = false, // Stores the config if resources to be served from local file system instead of normal proxy server
-    destinations, // List of destinations mentioned in local destinations file (to be extracted from middleware config)
-    routes, // Routes mentioned in neo-app.json
-    routesConfig = {}; // Route config for each type of route
-
-function addHeader(res, header, value) {
-	const current = res.get(header);
-	if ( current == null ) {
-		res.set(header, value);
-	} else if ( Array.isArray(current) ) {
-		res.set(header, [...current, value]);
-	} else {
-		res.set(header, [current, value]);
-	}
-}
-
-function initProxyDestination () {
-  buildRouteConfigMap();
-  if (destinations["sapui5"]) { // If resources can be served as per local destination config
-    if (destinations["sapui5"].localDir) {
-      isLocalResources = true;
-      serve = serveStatic(destinations["sapui5"].path, {
-        "index": false
-      });
-    }
-  }
-}
-
-function buildRouteConfigMap () {
-  routes.forEach(function (route) {
-    this[route.path] = route;
-  }, routesConfig);
-}
-
-function findRoute (routeToMatch) {
-  let matchedRoute = "";
-
-  // Find the longest matched route
-  for (let route in routesConfig) {
-    if (routeToMatch.includes(route)) {
-      matchedRoute = matchedRoute ? (matchedRoute.length < route.length ? route : matchedRoute) : route;
-    }
-  }
-
-  return matchedRoute;
-}
-
-function buildReqHeaders(destinationName, method) {
-  const destination = destinations[destinationName],
-  { Cookie, CSRFToken: token } = destination,
-    requiresToken = !["GET", "HEAD", "OPTIONS"].includes(method),
-    CSRFToken = (token === CSRFTokenActions.FETCH || requiresToken) && token,
-    entries = [
-      ["Cookie", Cookie],
-      ["X-CSRF-Token", CSRFToken]
-    ].filter(([, value]) => Boolean(value)),
-    headers = Object.fromEntries(entries);
-
-  return headers;
-}
-
-function buildProxyObject (reqUrl, matchedRoute, method) {
-  let routeProxyObj = {
-    resourcePath: "",
-    proxyConfig: {}
-  },
-  resourceRoute = routesConfig[matchedRoute].target,
-  routeDestination = destinations[resourceRoute.name],
-  rResourcePattern = new RegExp(`${matchedRoute}(/.*)$`),
-  resourcePath = rResourcePattern.exec(reqUrl)[1]; // Assumes there is some path after provided route url
-
-  // Serve SAPUI5 resources from destinations configuration
-  if (resourceRoute.type && resourceRoute.type === "service" && resourceRoute.name === "sapui5") {
-    routeProxyObj.resourcePath = resourceRoute.version ? `/${resourceRoute.version}` : "";
-    routeProxyObj.proxyConfig.target = routeDestination.cdn;
-  } else {
-    routeProxyObj.resourcePath = "";
-    routeProxyObj.proxyConfig.target = routeDestination.URL;
-    routeProxyObj.destinationName = resourceRoute.name;
-  }
-  routeProxyObj.proxyConfig.changeOrigin = true;
-  routeProxyObj.proxyConfig.headers = buildReqHeaders(resourceRoute.name, method);
-
-  routeProxyObj.resourcePath += (resourceRoute.entryPath || matchedRoute) + resourcePath;
-
-  if (isDebugMode) {
-    log.info(`Serving ${routeProxyObj.resourcePath} from ${routeProxyObj.proxyConfig.target}`);
-  }
-
-  // Add authorization info for proxy
-  if (routeDestination.User) {
-    routeProxyObj.proxyConfig.auth = `${routeDestination.User}:${routeDestination.Password}`;
-  }
-
-  return routeProxyObj;
-}
-
-function _getFormattedUrlForResource (sResourceUrl) {
-  var resourceRoute = routesConfig["/resources"].target,
-      rResourcePattern = new RegExp(`/resources(/.*)$`);
+function createMiddleware({ resources, options }) {
+  const
+    { all } = resources,
+    proxyEnabler = new ProxyEnabler({
+      all,
+      ...options.configuration
+    }), {
+      isDebugMode,
+      lockAuthentication,
+      unlockAuthentication
+    } = proxyEnabler,
+    logger = ui5logger.getLogger(MODULE_NAME),
+    proxyServer = new httpProxy.createProxyServer();
   
-  sResourceUrl = `${resourceRoute.version ? '/' + resourceRoute.version : ''}${resourceRoute.entryPath || "/resources"}${rResourcePattern.exec(sResourceUrl)[1]}`;
-  return sResourceUrl;
-}
+  let serve;
+  
+  proxyEnabler.initDestinations()
+  .then(({ ui5ResourcePath }) => {
+    serve = proxyEnabler.preferLocal && ui5ResourcePath && serveStatic(ui5ResourcePath, {
+      index: false
+    });
+  });
+  proxyEnabler.initRoutes();
 
-function lockAuthentication (proxyRes, req) {
-  const 
-    { headers: { "set-cookie" : cookies, "x-csrf-token": token } } = proxyRes,
-    { destinationName } = req;
+  proxyServer.on("proxyRes", proxyEnabler.lockAuthentication);
 
-    destination = destinations[destinationName] && !(destinations[destinationName].locked || false) ? destinations[destinationName] : null;
-
-  if (!destination) {
-    return;
-  }
-
-  destination.locked = true;
-  destination.Cookie = Array.isArray(cookies) ? cookies.join("; ") : "";
-  destination.CSRFToken = token !== CSRFTokenActions.REQUIRED && token;
-  destinations[destinationName] = destination;
-}
-
-function unlockAuthentication(destinationName) {
-  const destination = destinations[destinationName] && (destinations[destinationName].locked || false) ? destinations[destinationName] : null;
-
-  if (!destination) {
-    return;
-  }
-
-  destination.Cookie = "";
-  destination.CSRFToken = CSRFTokenActions.FETCH;
-  destination.locked = false;
-  destinations[destinationName] = destination;
-}
-
-/**
- * Custom UI5 Server middleware example
- *
- * @param {Object} parameters Parameters
- * @param {Object} parameters.resources Resource collections
- * @param {module:@ui5/fs.AbstractReader} parameters.resources.all Reader or Collection to read resources of the
- *                                        root project and its dependencies
- * @param {module:@ui5/fs.AbstractReader} parameters.resources.rootProject Reader or Collection to read resources of
- *                                        the project the server is started in
- * @param {module:@ui5/fs.AbstractReader} parameters.resources.dependencies Reader or Collection to read resources of
- *                                        the projects dependencies
- * @param {Object} parameters.options Options
- * @param {string} [parameters.options.configuration] Custom server middleware configuration if given in ui5.yaml
- * @param {string} [parameters.options.configuration.destination_path] Absolute Path in local system to find the set of destinations file
- * @param {string} [parameters.options.configuration.debug] If set, Logs messages for which calls are being proxied & from where
- * @returns {function} Middleware function to use
- */
-function createMiddleware({resources, options}) {
-  destinations = require(options.configuration.destination_path)["destinations"];
-  routes = require(resources.rootProject._readers[0]._project.path + "/neo-app.json")["routes"];
-  isDebugMode = options.configuration.debug || false;
-
-  initProxyDestination(); //Build all the configs for upcoming requests
-
-  proxyServer.on("proxyRes", lockAuthentication);
-
-  return async function proxyDestinations(req, res, next) {
+  return async function proxyDestination(req, res, next) {
+    let resolvedResource;
     try {
-      let matchedRoute;
-      
-      // Add headers for fetch
-      addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_ORIGIN, "*");
-      addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_CREDENTIALS, "true");
-      addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_METHODS, "GET,PUT,POST,DELETE");
-      addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_HEADERS, "X-Requested-With, Accept, Origin, Referer, User-Agent, Content-Type, Authorization");
-      // Intercept OPTIONS method
+      // Add generic headers to the response
+      Object.entries(proxyEnabler.resHeaders).forEach((entry) => {
+        res.append(...entry);
+      });
+
+      // Intercept OPTIONS Method, Doesn't need to proxy
       if (req.method === "OPTIONS") {
-        // addHeader(res, HEADER_ALLOW_CONTROL_ALLOW_ORIGIN, "*");
         res.status(200);
         next();
         return;
       }
 
-      // Perform route matching to see if neo-app.json contains any entry matching the URL
-      matchedRoute = findRoute(req.url);
-
-      if (!matchedRoute || matchedRoute === "/") {
+      resolvedResource = await proxyEnabler.resolveResource(req);
+      if (!resolvedResource.resolved) { // If middleware doesn't know how to handle this URL, it moves to next
+        if (isDebugMode) {
+          logger.info(`Skipping to next available middleware! Not sure how to handle ${req.url}`);
+        }
         next();
         return;
       }
-
-      if (matchedRoute.startsWith("/resources") && isLocalResources) {
-        req.url = _getFormattedUrlForResource(req.url);
+      req.url = resolvedResource.url;
+      if (resolvedResource.serveFromLocal) {
         if (isDebugMode) {
-          log.info(`Serving ${req.url} from ${destinations["sapui5"].path}`)
+          logger.info(`Serving ${req.url} from ${resolvedResource.target}`);
         }
         serve(req, res, finalhandler(req, res));
-      } else {
-        routeProxy = buildProxyObject(req.url, matchedRoute, req.method);
-        req.url = routeProxy.resourcePath;
-        req.destinationName = routeProxy.destinationName;
-        delete routeProxy.destinationName;
-        proxyServer.web(req, res, routeProxy.proxyConfig, (err) => {
+      } else if (resolvedResource.serveFromProxy) {
+        const config = proxyEnabler.getProxyConfig(resolvedResource);
+        req.destinationName = resolvedResource.name;
+        if (isDebugMode) {
+          logger.info(`Serving ${req.url} from ${config.target}`);
+        }
+        proxyServer.web(req, res, config, (err) => {
           if (err) {
-            unlockAuthentication(req.destinationName);
+            proxyEnabler.unlockAuthentication(resolvedResource.name); // Remove authentication information from destination object and skip to next middleware
             next(err);
           }
-        });
+        })
       }
+
     } catch (err) {
       next(err);
     }
-  };
 
+  };
 }
 
 module.exports = createMiddleware;
