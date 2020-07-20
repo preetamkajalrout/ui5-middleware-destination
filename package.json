@@ -1,6 +1,6 @@
 {
   "name": "ui5-middleware-destination",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Custom Server middleware to provide proxy capabilities and support neo-app.json",
   "main": "src/main.js",
   "scripts": {},
@@ -16,5 +16,15 @@
     "finalhandler": "^1.1.2",
     "http-proxy": "^1.17.0",
     "serve-static": "^1.14.1"
-  }
+  },
+  "keywords": [
+    "ui5-middleware-destination",
+    "ui5-tooling middleware",
+    "proxy",
+    "neo-app.json",
+    "neo-app",
+    "WebIDEUsage",
+    "Basic Authentication",
+    "ui5"
+  ]
 }
