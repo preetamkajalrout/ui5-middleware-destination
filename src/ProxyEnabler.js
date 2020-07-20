@@ -1,9 +1,14 @@
+const { resourceUsage } = require("process");
+
 const
   { existsSync, promises: fsPromises } = require("fs"),
   path = require("path"),
   URL = require("url"),
 
 
+  UI5_CDN = Object.freeze({
+    URL: "https://sapui5.hana.ondemand.com"
+  }),
   DESTINATION_TYPE = Object.freeze({
     "SERVICE": "service",
     "DESTINATION": "destination"
@@ -54,7 +59,7 @@ function buildHeaders(destination, method) {
   return headers;
 }
 
-function resolveDestinations(destination) {
+function resolveDestination(destination) {
   const
     { Name, User, Password, URL: url, WebIDEUsage = "", preferLocal = false } = destination,
     buffer = User && Buffer.from(`${User}:${Password}`),
@@ -95,7 +100,7 @@ async function readDestinations(destinationsPath) {
     files = await fsPromises.readdir(resolvedPath),
     resolvedFiles = files.map((file) => path.resolve(resolvedPath, file)),
     scpDestinations = resolvedFiles.reduce(toDestinations, []),
-    destinations = scpDestinations.map(resolveDestinations),
+    destinations = scpDestinations.map(resolveDestination),
     destinationStore = destinations.reduce(toDestinationStore, {});
 
   return destinationStore;
@@ -152,13 +157,15 @@ class ProxyEnabler {
         all: projectResources,
         debug: debugMode = false,
         destinationsPath,
-        strictSSL = true
-      } = parameters;
+        strictSSL = true,
+        resources = {}
+      } = parameters,
+      { path: ui5ResourcePath = "", preferLocal = false } = resources;
 
     this.projectResources = projectResources;
     this.destinationsPath = destinationsPath;
-    this.ui5ResourcePath = "";
-    this.preferLocal = false;
+    this.ui5ResourcePath = ui5ResourcePath;
+    this.preferLocal = preferLocal;
     this.isDebugMode = debugMode;
     this.resHeaders = EXTRA_HEADERS;
     this.strictSSL = strictSSL;
@@ -179,11 +186,21 @@ class ProxyEnabler {
     const envPath = process.env.UI5_MIDDLEWARE_RESOURCES_PATH || "";
     this.destinations = await readDestinations(this.destinationsPath);
     if (!this.ui5ResourcePath && this.destinations["sapui5"]) { // Middleware tries to default to cdn if no entry were provided
-      this.ui5ResourcePath = this.destinations["sapui5"].url || "https://sapui5.hana.ondemand.com";
+      this.ui5ResourcePath = this.destinations["sapui5"].url;
       this.preferLocal = this.destinations["sapui5"].preferLocal || false;
     }
-    this.ui5ResourcePath = this.ui5ResourcePath || envPath;
+    this.ui5ResourcePath = this.ui5ResourcePath || envPath || UI5_CDN.URL;
+    this.preferLocal = this.preferLocal || Boolean(parseInt(process.env.UI5_MIDDLEWARE_RESOURCES_LOCAL, 10)) || false;
 
+    // Build the final sapui5 destination
+    this.destinations["sapui5"] = resolveDestination({
+      URL: this.ui5ResourcePath,
+      preferLocal: this.preferLocal,
+      Name: "sapui5"
+    });
+
+    console.log(this.destinations["sapui5"]);
+    console.log(Boolean(parseInt(process.env.UI5_MIDDLEWARE_RESOURCES_LOCAL, 10)));
     return {
       ui5ResourcePath: this.ui5ResourcePath,
       destinations: this.destinations
