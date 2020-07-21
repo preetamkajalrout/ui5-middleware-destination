@@ -1,8 +1,7 @@
-const { resourceUsage } = require("process");
-
 const
-  { existsSync, promises: fsPromises } = require("fs"),
+  { promises: fsPromises } = require("fs"),
   path = require("path"),
+  readProperties = require("properties-reader"),
   URL = require("url"),
 
 
@@ -81,7 +80,8 @@ function toDestinations(scpDestinations, file) {
   const
     { ext } = path.parse(file),
     { destinations: jsonDestinations } = (ext === ".json") && require(file),
-    allDestinations = scpDestinations.concat(jsonDestinations),
+    webideDestination = (ext === "") && readProperties(file).path(),
+    allDestinations = scpDestinations.concat(jsonDestinations, webideDestination),
     filteredDestinations = allDestinations.filter(Boolean);
 
   return filteredDestinations;
@@ -181,7 +181,6 @@ class ProxyEnabler {
     this.resolveResource = this.resolveResource.bind(this);
   }
 
-
   async initDestinations() {
     const envPath = process.env.UI5_MIDDLEWARE_RESOURCES_PATH || "";
     this.destinations = await readDestinations(this.destinationsPath);
@@ -199,8 +198,6 @@ class ProxyEnabler {
       Name: "sapui5"
     });
 
-    console.log(this.destinations["sapui5"]);
-    console.log(Boolean(parseInt(process.env.UI5_MIDDLEWARE_RESOURCES_LOCAL, 10)));
     return {
       ui5ResourcePath: this.ui5ResourcePath,
       destinations: this.destinations
