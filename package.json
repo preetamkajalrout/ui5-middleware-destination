@@ -1,6 +1,6 @@
 {
   "name": "ui5-middleware-destination",
-  "version": "1.1.2",
+  "version": "2.0.1",
   "description": "Custom Server middleware to provide proxy capabilities and support neo-app.json",
   "main": "src/main.js",
   "scripts": {},
@@ -21,11 +21,15 @@
   "keywords": [
     "ui5-middleware-destination",
     "ui5-tooling middleware",
+    "destination",
+    "sap cloud platform destinations",
+    "ui5-tooling proxy",
     "proxy",
     "neo-app.json",
     "neo-app",
     "WebIDEUsage",
     "Basic Authentication",
+    "ui5-tooling",
     "ui5"
   ]
 }

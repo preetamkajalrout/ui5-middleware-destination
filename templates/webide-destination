@@ -1,0 +1,13 @@
+Name=example
+Description=< destination description >
+Type=HTTP
+TrustAll=true
+Authentication=BasicAuthentication
+User=< your system user >
+Password=< your system password >
+ProxyType=OnPremise
+URL=https\://<host>\:<port>
+WebIDEEnabled=true
+WebIDESystem=SID
+WebIDEUsage=odata_abap,ui5_execute_abap,dev_abap
+sap-client=< SAP client number >

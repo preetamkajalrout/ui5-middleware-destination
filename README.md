@@ -14,6 +14,8 @@ Create a directory to hold the destination files needed for your project -- pref
 
 This middleware will look in that directory for one (or many) json file(s) with a specific structure (check the [example json](templates/destinations.json)).
 
+As an alternative, the middleware will also look for destination files in the created directory. The structure of these files is the same as the one used in [WebIDE destination files](https://help.sap.com/viewer/825270ffffe74d9f988a0f0066ad59f0/CF/en-US/2cf47f37e34c428c97a51057733c0394.html) (also check the [example template](templates/webide-destination)).
+
 For the time being, the only properties required in a destination configuration are **`Name`, `URL`, `User`, `Password` and `WebIDEUsage`**.
 
 *NOTE: Storing passwords in plain text format ***is a potential security risk***. Please comply with your organization's policy.*
@@ -139,17 +141,8 @@ Options regarding SAPUI5 resources:
 ## Limitations
 Currently only BasicAuthentication is supported.
 
-## TODO
-
-- [x] Add as a npm module to npm registry
-- [ ] Support WebIDE destination files
-- [x] Support entryPath
-- [x] Support relative path settings
-- [ ] Use of environment variables for credentials
-- [x] Documentation on how to use the module
-
 ## Contribution Guidelines
-Pull Request are welcome to add more features. However, if change is complex or huge, Please create an issue and have a discussion on the approach.
+Pull Request are welcome. However, if change is complex or huge, Please create an issue and have a discussion on the approach before developing something.
 
 ## Contributors
 - [Preetam](https://github.com/preetamkajalrout)
